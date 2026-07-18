@@ -1,0 +1,32 @@
+{
+  "id": "pf1-buff-bundles",
+  "name": "pf1-buff-bundles",
+  "title": "Pathfinder 1e Buff Bundle",
+  "description": "Linked buff groups on the PF1 Buffs tab. Create named bundles, drag buffs into them, and toggle the whole group ON/OFF with one click. Every player can manage bundles on their own characters.",
+  "version": "1.0.0",
+  "author": "TableTopSoftware",
+  "authors": [
+    { "name": "TableTopSoftware" }
+  ],
+  "esmodules": [ "scripts/buff-bundles.js" ],
+  "styles": [],
+  "packs": [],
+  "system": "pf1",
+  "relationships": {
+    "systems": [
+      { "id": "pf1", "type": "system", "compatibility": {} }
+    ]
+  },
+  "compatibility": {
+    "minimum": "10",
+    "verified": "13"
+  },
+  "minimumCoreVersion": "10.0.0",
+  "compatibleCoreVersion": "13.0.0",
+  "url": "https://github.com/The-Data-is-a-lie/pf1-buff-bundles",
+  "manifest": "https://raw.githubusercontent.com/The-Data-is-a-lie/pf1-buff-bundles/main/module.json",
+  "download": "https://raw.githubusercontent.com/The-Data-is-a-lie/pf1-buff-bundles/main/downloads/pf1-buff-bundles.zip",
+  "readme": "https://github.com/The-Data-is-a-lie/pf1-buff-bundles/blob/main/README.md",
+  "changelog": "https://github.com/The-Data-is-a-lie/pf1-buff-bundles/blob/main/changelog.md",
+  "license": "https://github.com/The-Data-is-a-lie/pf1-buff-bundles/blob/main/LICENSE"
+}
