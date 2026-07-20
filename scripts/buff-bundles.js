@@ -150,6 +150,13 @@ const BB_CSS = `
     .${BB_LIST_CLASS} .bb-remove-member { cursor: pointer; opacity: .7; padding: 0 4px; font-weight: 700; flex: 0 0 auto; }
     .${BB_LIST_CLASS} .bb-drop { margin: 2px 0; padding: 3px; text-align: center; opacity: .6; border: 1px dashed rgba(120,120,120,.45); border-radius: 6px; }
     .${BB_LIST_CLASS} .bb-none { opacity: .6; padding: 2px 6px; font-size: var(--font-size-12); }
+
+    /* Pinned drop dock — a direct child of the scroll container (.item-groups-list),
+       NOT inside .bb-list, so its selectors sit at top level here. Sticky pins it to
+       the top of the buff list while everything below scrolls under it. */
+    .bb-dock { position: sticky; top: 0; z-index: 5; background: var(--pf1-item-list-bg); padding: 2px; display: flex; flex-direction: column; gap: 2px; }
+    .bb-dock-chip { padding: 3px; text-align: center; font-size: var(--font-size-12); opacity: .8; border: 1px dashed rgba(120,120,120,.6); border-radius: 6px; cursor: default; }
+    .bb-dock-chip.bb-over { outline: 2px solid #4b8; outline-offset: -2px; opacity: 1; }
 `;
 
 // Header mirrors a native section header so columns always line up. Prefer
@@ -347,6 +354,45 @@ function bbWireSection(list, actor) {
     }
 }
 
+// ---------- pinned drop dock ----------
+// A slim bar of drop chips (one per currently-expanded bundle) that lives as a
+// direct child of the scroll container (.item-groups-list) so `position: sticky`
+// pins it to the top of the buff list while every buff below scrolls under it.
+// It must NOT go inside .bb-list / .item-list — both are overflow:hidden and would
+// clip the sticky element. Returns null when nothing is expanded (no dock shown).
+function bbBuildDock(actor) {
+    let expanded = Object.entries(bbRawBundles(actor))
+        .filter(([id]) => bbExpandedSet().has(`${actor.id}:${id}`));
+    if (!expanded.length) return null;
+    let dock = document.createElement("div");
+    dock.className = "bb-dock";
+    dock.innerHTML = expanded
+        .map(([id, b]) => `<div class="bb-dock-chip" data-bundle-id="${id}">&#xFF0B; drag into ${bbEsc(b?.name ?? "Bundle")}</div>`)
+        .join("");
+    return dock;
+}
+
+// Same accept-a-buff-from-this-sheet drop logic as the bundle rows (bbWireSection).
+function bbWireDock(dock, actor) {
+    for (let chip of dock.querySelectorAll(".bb-dock-chip")) {
+        chip.addEventListener("dragover", (ev) => { ev.preventDefault(); chip.classList.add("bb-over"); });
+        chip.addEventListener("dragleave", () => chip.classList.remove("bb-over"));
+        chip.addEventListener("drop", async (ev) => {
+            ev.preventDefault();
+            // Without this the sheet's own drop handler ALSO fires and duplicates the item.
+            ev.stopPropagation();
+            chip.classList.remove("bb-over");
+            let data = null;
+            try { data = JSON.parse(ev.dataTransfer.getData("text/plain")); } catch (e) {}
+            if (data?.type !== "Item" || !data.uuid) return;
+            let doc = await fromUuid(data.uuid);
+            if (!doc) return;
+            let res = await bbAddMember(actor, chip.dataset.bundleId, doc.id);
+            if (!res.ok) ui.notifications.warn(`Bundle: ${res.reason}.`);
+        });
+    }
+}
+
 // The sheet's search handler skips our rows (see BB_CSS note), so filter
 // bundles by name — or any member's name — ourselves.
 function bbWireSearch(tab, actor) {
@@ -391,6 +437,7 @@ function bbInjectFilterPill(tab, app) {
 // ---------- injection ----------
 function bbInjectSection(tab, actor, app) {
     tab.querySelector(`.${BB_LIST_CLASS}`)?.remove();
+    tab.querySelector(".bb-dock")?.remove();
     tab.querySelector(".buff-bundles-panel")?.remove(); // stale panel from the old macro version
     // Same visibility rule the system applies to its own sections: show when
     // no filter is active, or when the Bundles filter is among the active ones.
@@ -401,6 +448,13 @@ function bbInjectSection(tab, actor, app) {
     let list = bbBuildSection(actor, tab);
     bbWireSection(list, actor);
     groups.insertBefore(list, groups.firstChild);
+    // The dock must sit directly in the scroll container, above .bb-list, so its
+    // sticky positioning pins it to the top of the buff list.
+    let dock = bbBuildDock(actor);
+    if (dock) {
+        bbWireDock(dock, actor);
+        groups.insertBefore(dock, groups.firstChild);
+    }
 }
 
 // Recover the sheet app from the DOM for rebuilds outside the render hook.
