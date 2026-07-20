@@ -157,6 +157,25 @@ const BB_CSS = `
     .bb-dock { position: sticky; top: 0; z-index: 5; background: var(--pf1-item-list-bg); padding: 2px; display: flex; flex-direction: column; gap: 2px; }
     .bb-dock-chip { padding: 3px; text-align: center; font-size: var(--font-size-12); opacity: .8; border: 1px dashed rgba(120,120,120,.6); border-radius: 6px; cursor: default; }
     .bb-dock-chip.bb-over { outline: 2px solid #4b8; outline-offset: -2px; opacity: 1; }
+
+    /* Manage-bundle popup. Renders inside a resizable Dialog (no .bb-list ancestor),
+       so member/drop styles are scoped to .bb-manage. The flex chain from
+       .window-content down lets the member list grow/shrink as the window is
+       resized, while the drop zone stays pinned at the top. */
+    .bb-manage-dialog .window-content { display: flex; flex-direction: column; }
+    .bb-manage-dialog .dialog-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .bb-manage { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; }
+    .bb-manage .bb-name-row { display: flex; gap: 4px; flex: 0 0 auto; }
+    .bb-manage .bb-name-row input { flex: 1; }
+    .bb-manage-members { flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+    .bb-manage .bb-member { display: flex; align-items: center; gap: 6px; padding: 1px 4px; }
+    .bb-manage .bb-dot { width: 8px; height: 8px; border-radius: 50%; background: #999; display: inline-block; flex: 0 0 auto; }
+    .bb-manage .bb-dot.on { background: #3c9; }
+    .bb-manage .bb-member-name { flex: 1; }
+    .bb-manage .bb-remove-member { cursor: pointer; opacity: .7; padding: 0 4px; font-weight: 700; flex: 0 0 auto; }
+    .bb-manage .bb-none { opacity: .6; padding: 2px 6px; font-size: var(--font-size-12); }
+    .bb-manage .bb-drop { flex: 0 0 auto; margin: 0; padding: 10px; text-align: center; opacity: .7; border: 1px dashed rgba(120,120,120,.6); border-radius: 6px; }
+    .bb-manage .bb-drop.bb-over { outline: 2px solid #4b8; outline-offset: -2px; opacity: 1; }
 `;
 
 // Header mirrors a native section header so columns always line up. Prefer
@@ -232,6 +251,9 @@ function bbBuildRow(actor, header, bundleId, bundle, index) {
             </div>`).join("");
         let panel = document.createElement("div");
         panel.className = "item-summary bb-members";
+        // Drop hint inside the open bundle. The actual drop is handled by the row-level
+        // dragover/drop listeners (bbWireSection) — the whole expanded row is a drop target;
+        // this just makes that obvious and gives empty bundles something to aim at.
         panel.innerHTML = `${rows}<div class="bb-drop">drag buffs here to add</div>`;
         row.appendChild(panel);
     }
@@ -294,23 +316,11 @@ function bbWireSection(list, actor) {
             if (!res.ok) ui.notifications.warn(`Bundle: ${res.reason}.`);
         });
 
-        row.querySelector(".bb-rename")?.addEventListener("click", async (ev) => {
+        // "Rename" now opens a fuller manage popup: rename + a drop zone you can
+        // drag buffs into (the popup shares the page DOM with the sheet).
+        row.querySelector(".bb-rename")?.addEventListener("click", (ev) => {
             ev.stopPropagation();
-            let current = bbRawBundles(actor)[bundleId]?.name ?? "Bundle";
-            let name = null;
-            try {
-                name = await Dialog.prompt({
-                    title: "Rename Bundle",
-                    content: `<p><input type="text" name="bundleName" value="${bbEsc(current)}" style="width:100%" autofocus/></p>`,
-                    label: "Rename",
-                    callback: (html) => html.find?.('[name="bundleName"]')?.val() ?? html.querySelector?.('[name="bundleName"]')?.value,
-                    rejectClose: false
-                });
-            } catch (e) { name = null; }
-            if (name === null || name === undefined) return;
-            let trimmed = String(name).trim();
-            if (!trimmed || trimmed === current) return;
-            await bbRenameBundle(actor, bundleId, trimmed);
+            bbOpenManageDialog(actor, bundleId);
         });
 
         row.querySelector(".bb-delete")?.addEventListener("click", async (ev) => {
@@ -391,6 +401,84 @@ function bbWireDock(dock, actor) {
             if (!res.ok) ui.notifications.warn(`Bundle: ${res.reason}.`);
         });
     }
+}
+
+// ---------- manage-bundle popup (rename + drag-drop members) ----------
+// A non-modal Dialog that shares the page DOM with the sheet, so buff rows can be
+// dragged straight from the sheet onto its drop zone. Stays open, so you can drop
+// several buffs in a row; rename and member-remove happen in-place without closing.
+function bbManageMembersHtml(actor, bundleId) {
+    let members = bbMembers(actor, bundleId);
+    if (!members.length) return `<div class="bb-none">No members yet — drag buffs into the box below.</div>`;
+    return members.map(i => `
+        <div class="bb-member" data-item-id="${i.id}">
+            <span class="bb-dot ${i.system?.active ? "on" : ""}"></span>
+            <span class="bb-member-name">${bbEsc(i.name)}</span>
+            <a class="bb-remove-member" title="Remove from bundle (does not delete the buff)">&times;</a>
+        </div>`).join("");
+}
+
+function bbOpenManageDialog(actor, bundleId) {
+    let current = bbRawBundles(actor)[bundleId]?.name ?? "Bundle";
+    let content = `
+        <div class="bb-manage">
+            <div class="bb-drop bb-manage-drop">drag buffs here to add</div>
+            <div class="bb-name-row">
+                <input type="text" name="bundleName" value="${bbEsc(current)}" placeholder="Bundle name"/>
+                <button type="button" class="bb-manage-rename">Rename</button>
+            </div>
+            <div class="bb-manage-members">${bbManageMembersHtml(actor, bundleId)}</div>
+        </div>`;
+    new Dialog({
+        title: `Manage Bundle: ${current}`,
+        content,
+        buttons: { close: { label: "Close" } },
+        default: "close",
+        render: (html) => {
+            // (listeners wired below)
+            let root = html?.jquery ? html[0] : (html instanceof HTMLElement ? html : html?.[0]);
+            if (!root?.querySelector) return;
+            let membersEl = root.querySelector(".bb-manage-members");
+
+            let wireRemove = () => {
+                for (let x of membersEl?.querySelectorAll(".bb-remove-member") ?? []) {
+                    x.addEventListener("click", async (ev) => {
+                        let itemId = ev.currentTarget.closest(".bb-member")?.dataset.itemId;
+                        if (itemId) { await bbRemoveMember(actor, bundleId, itemId); refresh(); }
+                    });
+                }
+            };
+            let refresh = () => { if (membersEl) { membersEl.innerHTML = bbManageMembersHtml(actor, bundleId); wireRemove(); } };
+            wireRemove();
+
+            // Rename applies in-place so the popup can stay open for more drops.
+            let input = root.querySelector('[name="bundleName"]');
+            let doRename = async () => {
+                let trimmed = String(input?.value ?? "").trim();
+                if (trimmed && trimmed !== (bbRawBundles(actor)[bundleId]?.name ?? "")) await bbRenameBundle(actor, bundleId, trimmed);
+            };
+            root.querySelector(".bb-manage-rename")?.addEventListener("click", doRename);
+            input?.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); doRename(); } });
+
+            // Drop zone: same accept-a-buff-from-this-sheet logic as the rows/dock.
+            let drop = root.querySelector(".bb-manage-drop");
+            drop?.addEventListener("dragover", (ev) => { ev.preventDefault(); drop.classList.add("bb-over"); });
+            drop?.addEventListener("dragleave", () => drop.classList.remove("bb-over"));
+            drop?.addEventListener("drop", async (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                drop.classList.remove("bb-over");
+                let data = null;
+                try { data = JSON.parse(ev.dataTransfer.getData("text/plain")); } catch (e) {}
+                if (data?.type !== "Item" || !data.uuid) return;
+                let doc = await fromUuid(data.uuid);
+                if (!doc) return;
+                let res = await bbAddMember(actor, bundleId, doc.id);
+                if (!res.ok) ui.notifications.warn(`Bundle: ${res.reason}.`);
+                else refresh();
+            });
+        }
+    }, { resizable: true, width: 420, height: 480, classes: ["dialog", "bb-manage-dialog"] }).render(true);
 }
 
 // The sheet's search handler skips our rows (see BB_CSS note), so filter
