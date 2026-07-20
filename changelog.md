@@ -1,5 +1,10 @@
 Unreleased
 
+Version 1.0.1 (2026-07-20)
+
+- Pinned drop dock: while a bundle is expanded, a drop chip stays pinned at the top of the buff list, so buffs deep in a long list can be dragged straight up into the bundle without scrolling back.
+- Resizable "Manage Bundle" popup (opened from a bundle's Rename control): drag buffs from the sheet onto its top drop zone, remove members inline, and rename in place. The window is resizable and the member list grows to fit.
+
 Version 1.0.0 (2026-07-18)
 
 - Initial release.
